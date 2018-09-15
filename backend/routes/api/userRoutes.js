@@ -1,10 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
-const mysql = require("mysql");
+const jwt = require("jsonwebtoken");
 
 // validation
 const validateRegistration = require("../../validation/user/registration");
+const validateLogin = require("../../validation/user/login");
 
 // @route   GET api/users/test
 // @desc    Tests users route
@@ -24,9 +25,9 @@ router.post("/register", (req, res) => {
   if (!isValid) return res.status(400).json(errors);
 
   const { first_name, last_name, email } = req.body;
+  const SELECT_USERS_BY_EMAIL = `select id from users where email = '${email}' limit 1`;
   const connection = req.app.get("connection");
 
-  const SELECT_USERS_BY_EMAIL = `select id from users where email = '${email}'`;
   connection.query(SELECT_USERS_BY_EMAIL, (err, results) => {
     if (err) return res.send(err);
     if (results.length) {
@@ -52,7 +53,48 @@ router.post("/register", (req, res) => {
 // @desc    User Login
 // @access  Public
 router.post("/login", (req, res) => {
-  const { errors, isvalid } = null;
+  const { errors, isValid } = validateLogin(req.body);
+
+  // Validation check
+  if (!isValid) return res.status(400).json(errors);
+
+  const { email, password } = req.body;
+  const SELECT_USERS_BY_EMAIL = `select * from users where email = '${email}' limit 1`;
+  const connection = req.app.get("connection");
+
+  connection.query(SELECT_USERS_BY_EMAIL, (err, results) => {
+    if (err) return res.send(err);
+
+    // check if there's a username with that email
+    if (!results.length) {
+      errors.email = "Invalid email / password pair";
+      return res.status(400).json(errors);
+    }
+
+    // check password
+    bcrypt.compare(password, results[0].password).then(isMatch => {
+      if (isMatch) {
+        const payload = {
+          id: results[0].id,
+          firstname: results[0].first_name,
+          lastname: results[0].last_name,
+          email: results[0].email
+        };
+
+        jwt.sign(
+          payload,
+          process.env.ACCESS_KEY,
+          { expiresIn: "7d" },
+          (err, token) => {
+            res.json({ token: "bearer " + token });
+          }
+        );
+      } else {
+        errors.email = "Invalid email / password pair";
+        return res.status(400).json(errors);
+      }
+    });
+  });
 });
 
 module.exports = router;
